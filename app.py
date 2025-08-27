@@ -5,7 +5,12 @@ import os
 from models import obtener_usuario, crear_usuario, actualizar_usuario, obtener_tema
 
 app = Flask(__name__)
-CORS(app)
+
+# ============================
+# CONFIGURACIÓN DE CORS
+# ============================
+# Permite peticiones desde cualquier origen (útil para pruebas locales y frontend en otra URL)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # ============================
 # RUTAS API
@@ -162,5 +167,6 @@ def chat():
         return jsonify({"respuesta": "❌ Ocurrió un error en el servidor"}), 500
 
 
+# Para producción con Gunicorn (Render no usa app.run)
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)
