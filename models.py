@@ -4,10 +4,9 @@ import os
 # ========================
 # CONFIGURACIÓN DE CONEXIÓN
 # ========================
-# Usamos DATABASE_URL en lugar de host, user, password separados
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://neondb_owner:npg_zl2KdoOMw3fe@ep-fancy-pond-ad8clkzt-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+    "postgresql://neondb_owner:npg_zl2KdoOMw3fe@ep-fancy-pond-ad8clkzt-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require"
 )
 
 def get_connection():
