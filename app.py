@@ -1,158 +1,140 @@
 from flask import Flask, request, jsonify
-import sqlite3
 from flask_cors import CORS
 from datetime import datetime
 import os
+from models import obtener_usuario, crear_usuario, actualizar_usuario, obtener_tema
 
 app = Flask(__name__)
 CORS(app)
 
-# Ruta de la base de datos
-DB_PATH = os.environ.get("DB_PATH") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "induccion.db")
-
-# ============================
-# FUNCIONES DE APOYO
-# ============================
-
-def init_db():
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS usuarios (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                nombre TEXT,
-                documento TEXT,
-                fecha TEXT,
-                tema_actual TEXT,
-                correctas INTEGER DEFAULT 0,
-                incorrectas INTEGER DEFAULT 0,
-                nota REAL DEFAULT 0
-            )
-        """)
-        conn.commit()
-
-def obtener_usuario():
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM usuarios ORDER BY id DESC LIMIT 1")
-        return cursor.fetchone()
-
-def crear_usuario(nombre, documento, fecha):
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO usuarios (nombre, documento, fecha) VALUES (?, ?, ?)
-        """, (nombre, documento, fecha))
-        conn.commit()
-
-def actualizar_usuario(campo, valor):
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute(f"""
-            UPDATE usuarios SET {campo} = ? WHERE id = (SELECT id FROM usuarios ORDER BY id DESC LIMIT 1)
-        """, (valor,))
-        conn.commit()
-
-def obtener_tema():
-    user = obtener_usuario()
-    if user:
-        return user[4]  # campo tema_actual
-    return None
-
-# ============================
-# TEMAS Y QUIZ
-# ============================
-
-temas = {
-    "riesgos": {
-        "contenido": "📌 Riesgos en el trabajo:\n1. Físicos\n2. Químicos\n3. Biológicos\n4. Ergonómicos\n5. Psicosociales",
-        "quiz": {
-            "pregunta": "❓ ¿Cuál de estos es un riesgo ergonómico?\n\na) Posturas inadecuadas\nb) Ruidos fuertes\nc) Productos químicos",
-            "respuesta": "a"
-        }
-    },
-    "convivencia": {
-        "contenido": "🤝 Convivencia laboral:\n- Respeto\n- Comunicación asertiva\n- Trabajo en equipo",
-        "quiz": {
-            "pregunta": "❓ ¿Qué valor hace parte de la convivencia laboral?\n\na) Gritos\nb) Respeto\nc) Individualismo",
-            "respuesta": "b"
-        }
-    }
-}
-
-# ============================
-# API PRINCIPAL
-# ============================
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({"message": "🚀 API de Inducción funcionando"})
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    data = request.json
-    mensaje = data.get("mensaje", "").strip().lower()
-    user = obtener_usuario()
+    try:
+        user_id = request.json.get("usuario_id") or request.remote_addr
+        pregunta = request.json.get("pregunta", "").strip().lower()
 
-    # ============================
-    # REGISTRO DE USUARIO
-    # ============================
-    if not user:
-        return jsonify({"respuesta": "👋 ¡Hola! Bienvenido a la inducción. Por favor dime tu *nombre completo*."})
+        # Obtener o crear usuario
+        user = obtener_usuario(user_id)
+        if not user:
+            crear_usuario(user_id)
+            return jsonify({"respuesta": "👋 Bienvenido, dime tu *nombre completo* para empezar."})
 
-    if not user[1]:  # Nombre
-        actualizar_usuario("nombre", mensaje)
-        return jsonify({"respuesta": f"✅ Gracias {mensaje}. Ahora dime tu *documento de identidad*."})
+        (id, usuario_id, nombre, documento, fecha, estado, tema_actual,
+         indice, contador, temas_completados, correctas, incorrectas) = user
 
-    if not user[2]:  # Documento
-        actualizar_usuario("documento", mensaje)
-        return jsonify({"respuesta": "📅 Perfecto. Ingresa la *fecha de esta conversación* (AAAA-MM-DD)."})
+        temas_disponibles = ["riesgos", "aspectos", "impacto", "procedimientos", "comites", "emergencias", "responsabilidades"]
+        temas_completados = temas_completados.split(",") if temas_completados else []
 
-    if not user[3]:  # Fecha
-        try:
-            datetime.strptime(mensaje, "%Y-%m-%d")
-            actualizar_usuario("fecha", mensaje)
-            return jsonify({"respuesta": f"✅ Registro completado. 👤 Nombre: {user[1]} 🆔 Documento: {user[2]} 📅 Fecha: {mensaje}\n\nEscribe 'tema' para ver los disponibles."})
-        except ValueError:
-            return jsonify({"respuesta": "⚠️ Formato inválido. Usa AAAA-MM-DD."})
+        # =======================
+        # FLUJO DE REGISTRO
+        # =======================
+        if estado == "pidiendo_nombre":
+            actualizar_usuario(user_id, "nombre", pregunta.title())
+            actualizar_usuario(user_id, "estado", "pidiendo_documento")
+            return jsonify({"respuesta": f"✅ Gracias {pregunta.title()}. Ahora dime tu *documento*."})
 
-    tema_actual = obtener_tema()
+        if estado == "pidiendo_documento":
+            actualizar_usuario(user_id, "documento", pregunta)
+            actualizar_usuario(user_id, "estado", "pidiendo_fecha")
+            return jsonify({"respuesta": "📅 Perfecto. Ingresa la *fecha de hoy* (AAAA-MM-DD)."})
 
-    # ============================
-    # LISTAR TEMAS
-    # ============================
-    if mensaje == "tema":
-        if tema_actual:  # ya está en un tema
-            return jsonify({"respuesta": "⚠️ Debes terminar el tema actual antes de elegir otro."})
+        if estado == "pidiendo_fecha":
+            try:
+                fecha_valida = datetime.strptime(pregunta, "%Y-%m-%d").date()
+                actualizar_usuario(user_id, "fecha", str(fecha_valida))
+            except ValueError:
+                return jsonify({"respuesta": "⚠️ Fecha inválida. Usa AAAA-MM-DD."})
 
-        lista = "\n".join([f"- {t}" for t in temas.keys()])
-        return jsonify({"respuesta": f"📚 Temas disponibles:\n{lista}\n\nEscribe el nombre del tema para iniciar."})
+            actualizar_usuario(user_id, "estado", "registrado")
+            return jsonify({
+                "respuesta": "✅ Registro completado. Escribe 'tema' para ver los disponibles."
+            })
 
-    # ============================
-    # SELECCIONAR TEMA
-    # ============================
-    if mensaje in temas.keys():
+        # =======================
+        # LISTAR TEMAS
+        # =======================
+        if pregunta == "tema":
+            if tema_actual:
+                return jsonify({"respuesta": f"⚠️ Debes terminar el tema **{tema_actual}** antes de elegir otro."})
+
+            pendientes = [t for t in temas_disponibles if t not in temas_completados]
+            if not pendientes:
+                total = correctas + incorrectas
+                nota = round((correctas * 5) / total, 2) if total > 0 else 0
+                return jsonify({
+                    "respuesta": f"🎓 Has finalizado la inducción.\n✅ Correctas: {correctas}\n❌ Incorrectas: {incorrectas}\n📊 Nota: {nota}/5"
+                })
+            return jsonify({
+                "respuesta": "📚 Temas disponibles:\n" + "\n".join([f"- {t}" for t in pendientes])
+            })
+
+        # =======================
+        # SELECCIONAR TEMA
+        # =======================
+        if pregunta in temas_disponibles:
+            if tema_actual and tema_actual != pregunta:
+                return jsonify({"respuesta": f"⚠️ Ya estás en el tema **{tema_actual}**. Termínalo antes de cambiar."})
+
+            if pregunta in temas_completados:
+                return jsonify({"respuesta": f"✅ El tema **{pregunta}** ya fue completado."})
+
+            actualizar_usuario(user_id, "tema_actual", pregunta)
+            actualizar_usuario(user_id, "indice", 0)
+            actualizar_usuario(user_id, "contador", 0)
+
+            preguntas = obtener_tema(pregunta)
+            if not preguntas:
+                return jsonify({"respuesta": f"⚠️ No hay contenido para {pregunta}."})
+
+            tipo, contenido, _ = preguntas[0]
+            return jsonify({"respuesta": f"💡 {contenido}"})
+
+        # =======================
+        # MANEJO DEL TEMA ACTUAL
+        # =======================
         if tema_actual:
-            return jsonify({"respuesta": "⚠️ Ya estás en un tema. Debes terminarlo antes de cambiar."})
+            preguntas = obtener_tema(tema_actual)
+            idx = indice
+            cont = contador
 
-        actualizar_usuario("tema_actual", mensaje)
-        return jsonify({"respuesta": f"{temas[mensaje]['contenido']}\n\n{temas[mensaje]['quiz']['pregunta']}"})
+            if idx >= len(preguntas):
+                temas_completados.append(tema_actual)
+                actualizar_usuario(user_id, "temas_completados", ",".join(temas_completados))
+                actualizar_usuario(user_id, "tema_actual", None)
+                return jsonify({"respuesta": f"✅ Has completado **{tema_actual}**.\nEscribe 'tema' para continuar."})
 
-    # ============================
-    # RESPUESTA A QUIZ
-    # ============================
-    if tema_actual:
-        quiz = temas[tema_actual]["quiz"]
-        if mensaje == quiz["respuesta"]:
-            actualizar_usuario("correctas", user[5] + 1)
-            actualizar_usuario("tema_actual", None)
-            return jsonify({"respuesta": "✅ ¡Correcto! Has terminado este tema.\n\nEscribe 'tema' para continuar con otro."})
-        else:
-            actualizar_usuario("incorrectas", user[6] + 1)
-            return jsonify({"respuesta": "❌ Incorrecto. Intenta de nuevo."})
+            tipo, contenido, respuesta_correcta = preguntas[idx]
 
-    return jsonify({"respuesta": "🤔 No entendí. Escribe 'tema' para comenzar."})
+            if tipo == "info":
+                actualizar_usuario(user_id, "indice", idx + 1)
+                return jsonify({"respuesta": f"💡 {contenido}"})
 
-# ============================
-# INICIO
-# ============================
+            if tipo == "pregunta":
+                if pregunta == respuesta_correcta.lower():
+                    actualizar_usuario(user_id, "indice", idx + 1)
+                    actualizar_usuario(user_id, "contador", 0)
+                    actualizar_usuario(user_id, "respuestas_correctas", correctas + 1)
+                    return jsonify({"respuesta": "🎉 ¡Correcto!"})
+                else:
+                    cont += 1
+                    if cont >= 3:
+                        actualizar_usuario(user_id, "indice", idx + 1)
+                        actualizar_usuario(user_id, "contador", 0)
+                        actualizar_usuario(user_id, "respuestas_incorrectas", incorrectas + 1)
+                        return jsonify({"respuesta": f"❌ Incorrecto. La respuesta era: {respuesta_correcta}"})
+                    else:
+                        actualizar_usuario(user_id, "contador", cont)
+                        return jsonify({"respuesta": f"⚠️ Incorrecto. Intento {cont}/3"})
+
+        return jsonify({"respuesta": "🤔 No entendí. Escribe 'tema' para continuar."})
+
+    except Exception as e:
+        print("💥 Error en /chat:", e)
+        return jsonify({"respuesta": "❌ Error interno en el servidor"}), 500
 
 if __name__ == "__main__":
-    init_db()
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)
