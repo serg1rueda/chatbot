@@ -5,15 +5,7 @@ import os
 from models import obtener_usuario, crear_usuario, actualizar_usuario, obtener_tema
 
 app = Flask(__name__)
-
-# ============================
-# CONFIGURACIÓN DE CORS
-# ============================
 CORS(app, resources={r"/*": {"origins": "*"}})
-
-# ============================
-# RUTAS API
-# ============================
 
 @app.route("/", methods=["GET"])
 def home():
@@ -28,26 +20,26 @@ def chat():
         user_id = request.json.get("usuario_id") or request.remote_addr
         pregunta = request.json.get("pregunta", "").strip().lower()
 
-        # Verificar si el usuario existe
+        # ============================
+        # OBTENER USUARIO
+        # ============================
         user = obtener_usuario(user_id)
         if not user:
-            # Primera vez que escribe → registrar
             crear_usuario(user_id)
             nombre_limpio = pregunta.title()
             actualizar_usuario(user_id, "nombre", nombre_limpio)
             actualizar_usuario(user_id, "estado", "pidiendo_documento")
             return jsonify({"respuesta": f"📄 Perfecto {nombre_limpio}. Ahora, por favor, ingresa tu *número de documento*."})
 
-        # Mapeo de columnas de la tabla usuarios
         (_, _, nombre, documento, fecha, estado, tema_actual, indice, contador,
          temas_completados, respuestas_correctas, respuestas_incorrectas) = user
 
         temas_disponibles = ["riesgos", "aspectos", "impacto", "procedimientos", "comites", "emergencias", "responsabilidades"]
         temas_completados = temas_completados.split(",") if temas_completados else []
 
-        # =======================
+        # ============================
         # FLUJO DE REGISTRO
-        # =======================
+        # ============================
         if estado == "pidiendo_nombre":
             actualizar_usuario(user_id, "nombre", pregunta.title())
             actualizar_usuario(user_id, "estado", "pidiendo_documento")
@@ -64,9 +56,7 @@ def chat():
                 actualizar_usuario(user_id, "fecha", str(fecha_valida))
             except ValueError:
                 return jsonify({"respuesta": "⚠️ Formato de fecha inválido. Usa AAAA-MM-DD (ejemplo: 2025-08-22)"})
-
             actualizar_usuario(user_id, "estado", "registrado")
-
             mensaje_registro = (
                 f"✅ Registro completado.\n"
                 f"👤 Nombre: {nombre or pregunta.title()}\n"
@@ -74,7 +64,6 @@ def chat():
                 f"📅 Fecha: {fecha or str(fecha_valida)}\n\n"
                 "✍️ Escribe 'tema' para ver los temas disponibles."
             )
-
             mensaje_intro = (
                 "🌱 **Quiénes Somos**\n\n"
                 "Ambipar ofrece servicios y productos para la gestión ambiental, "
@@ -83,17 +72,14 @@ def chat():
                 "que superen los desafíos de sostenibilidad. "
                 "Para nosotros, la sostenibilidad no es un discurso, es nuestro día a día."
             )
-
             return jsonify({"respuesta": mensaje_registro, "siguiente": mensaje_intro})
 
-        # =======================
+        # ============================
         # SELECCIÓN DE TEMAS
-        # =======================
+        # ============================
         if pregunta == "tema":
-            # 🚫 Bloquear si ya hay un tema en curso
             if tema_actual:
                 return jsonify({"respuesta": f"⚠️ Debes terminar el tema **{tema_actual}** antes de elegir otro."})
-
             pendientes = [t for t in temas_disponibles if t not in temas_completados]
             if not pendientes:
                 total = respuestas_correctas + respuestas_incorrectas
@@ -107,32 +93,29 @@ def chat():
             })
 
         if pregunta in temas_disponibles:
-            # 🚫 No dejar cambiar si ya hay un tema en curso distinto
             if tema_actual and tema_actual != pregunta:
                 return jsonify({"respuesta": f"⚠️ Ya estás trabajando en el tema **{tema_actual}**. Debes terminarlo antes de iniciar otro."})
-
-            # ✅ Si intenta seleccionar el mismo tema que ya tiene activo, no reseteamos progreso
-            if tema_actual and tema_actual == pregunta:
-                # Responder de forma amable sin reiniciar índices
-                return jsonify({"respuesta": f"🟡 Ya estás en **{tema_actual}**. Continúa respondiendo para avanzar."})
-
             if pregunta in temas_completados:
                 return jsonify({"respuesta": f"✅ El tema **{pregunta}** ya fue completado. Escribe 'tema' para ver los que faltan."})
 
-            # Iniciar tema (solo cuando no hay activo)
+            # Iniciar nuevo tema sin repetir la primera info
             actualizar_usuario(user_id, "tema_actual", pregunta)
             actualizar_usuario(user_id, "indice", 0)
             actualizar_usuario(user_id, "contador", 0)
             preguntas = obtener_tema(pregunta)
             if not preguntas:
                 return jsonify({"respuesta": f"⚠️ No encontré contenido para el tema {pregunta}."})
-            tipo, contenido, _ = preguntas[0]
-            siguiente = preguntas[1][1] if len(preguntas) > 1 else "📌 Fin del tema."
-            return jsonify({"respuesta": f"💡 {contenido}", "siguiente": siguiente})
 
-        # =======================
+            tipo, contenido, _ = preguntas[0]
+            if tipo == "info":
+                actualizar_usuario(user_id, "indice", 1)  # pasamos al siguiente item
+                return jsonify({"respuesta": f"💡 {contenido}"})
+            else:
+                return jsonify({"respuesta": f"💡 {contenido}"})
+
+        # ============================
         # MANEJO DE CONTENIDO
-        # =======================
+        # ============================
         if tema_actual:
             preguntas = obtener_tema(tema_actual)
             idx = indice
@@ -148,8 +131,7 @@ def chat():
 
             if tipo == "info":
                 actualizar_usuario(user_id, "indice", idx + 1)
-                siguiente = preguntas[idx+1][1] if idx+1 < len(preguntas) else "📌 Fin del tema."
-                return jsonify({"respuesta": f"💡 {contenido}", "siguiente": siguiente})
+                return jsonify({"respuesta": f"💡 {contenido}"})
 
             # Preguntas tipo quiz
             opciones = contenido.split(";") if ";" in contenido else [contenido]
@@ -159,27 +141,26 @@ def chat():
                 actualizar_usuario(user_id, "indice", idx + 1)
                 actualizar_usuario(user_id, "contador", 0)
                 actualizar_usuario(user_id, "respuestas_correctas", respuestas_correctas + 1)
-                siguiente = preguntas[idx+1][1] if idx+1 < len(preguntas) else "📌 Fin del tema."
-                return jsonify({"respuesta": f"🎉 ¡Correcto! {respuesta_correcta}", "siguiente": siguiente})
+                return jsonify({"respuesta": f"🎉 ¡Correcto! {respuesta_correcta}"})
             else:
                 cont += 1
                 if cont >= 3:
                     actualizar_usuario(user_id, "indice", idx + 1)
                     actualizar_usuario(user_id, "contador", 0)
                     actualizar_usuario(user_id, "respuestas_incorrectas", respuestas_incorrectas + 1)
-                    siguiente = preguntas[idx+1][1] if idx+1 < len(preguntas) else "📌 Fin del tema."
-                    return jsonify({"respuesta": f"❌ Incorrecto. La respuesta era: {respuesta_correcta}", "siguiente": siguiente})
+                    return jsonify({"respuesta": f"❌ Incorrecto. La respuesta era: {respuesta_correcta}"})
                 else:
                     actualizar_usuario(user_id, "contador", cont)
                     return jsonify({"respuesta": f"⚠️ Incorrecto. Intento {cont}/3\n\nOpciones:\n{opciones_ordenadas}"})
 
+        # ============================
+        # MENSAJE POR DEFECTO
+        # ============================
         return jsonify({"respuesta": "⚠️ No entendí tu mensaje. Escribe 'tema' para continuar."})
 
     except Exception as e:
         print("💥 Error en /chat:", e)
         return jsonify({"respuesta": "❌ Ocurrió un error en el servidor"}), 500
 
-
-# Para producción con Gunicorn (Render no usa app.run)
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)
