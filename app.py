@@ -1,4 +1,3 @@
-# app.py
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from datetime import datetime
@@ -6,7 +5,6 @@ import os
 from models import obtener_usuario, crear_usuario, actualizar_usuario, obtener_tema
 
 app = Flask(__name__)
-# permitir CORS desde cualquier origen (útil en pruebas / frontend local)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 temas_disponibles = ["riesgos", "aspectos", "impacto", "procedimientos", "comites", "emergencias", "responsabilidades"]
@@ -28,20 +26,19 @@ def chat():
         # obtener usuario
         user = obtener_usuario(user_id)
         if not user:
-            # primer mensaje: creamos el registro y tomamos esa entrada como nombre
             crear_usuario(user_id)
             nombre_limpio = pregunta_raw.strip().title() if pregunta_raw else "Usuario"
             actualizar_usuario(user_id, "nombre", nombre_limpio)
             actualizar_usuario(user_id, "estado", "pidiendo_documento")
             return jsonify({"respuesta": f"📄 Perfecto {nombre_limpio}. Ahora, por favor, ingresa tu *número de documento*."})
 
-        # Desempaquetar columnas (según schema)
+        # desempaquetar columnas de la tabla usuarios
         (_, _, nombre, documento, fecha, estado, tema_actual, indice, contador,
          temas_completados, respuestas_correctas, respuestas_incorrectas) = user
 
         temas_completados = temas_completados.split(",") if temas_completados else []
 
-        # ------------- Flujo de registro -------------
+        # ---------- flujo de registro ----------
         if estado == "pidiendo_nombre":
             actualizar_usuario(user_id, "nombre", pregunta_raw.strip().title())
             actualizar_usuario(user_id, "estado", "pidiendo_documento")
@@ -76,9 +73,9 @@ def chat():
             )
             return jsonify({"respuesta": mensaje_registro, "siguiente": mensaje_intro})
 
-        # ------------- Mostrar lista de temas -------------
+        # ---------- mostrar lista de temas ----------
         if pregunta == "tema":
-            # si ya hay un tema en curso (en progreso o confirmación) bloquear listado
+            # bloquear si ya hay un tema activo
             if tema_actual and estado in ("en_curso", "confirmar_responder"):
                 return jsonify({"respuesta": f"⚠️ Debes terminar el tema **{tema_actual}** antes de elegir otro."})
             pendientes = [t for t in temas_disponibles if t not in temas_completados]
@@ -93,140 +90,193 @@ def chat():
                 "temas": pendientes
             })
 
-        # ------------- Selección de tema (se muestra descripción + confirmación) -------------
+        # ---------- seleccionar tema: mostrar descripción y pedir confirmación ----------
         if pregunta in temas_disponibles:
-            # si hay tema distinto en curso
             if tema_actual and tema_actual != pregunta and estado == "en_curso":
                 return jsonify({"respuesta": f"⚠️ Ya estás trabajando en el tema **{tema_actual}**. Debes terminarlo antes de iniciar otro."})
-
             if pregunta in temas_completados:
                 return jsonify({"respuesta": f"✅ El tema **{pregunta}** ya fue completado. Escribe 'tema' para ver los que faltan."})
 
-            # Obtener contenido del tema: esperamos que el primer registro sea 'info'
             preguntas_tema = obtener_tema(pregunta)
             if not preguntas_tema:
                 return jsonify({"respuesta": f"⚠️ No encontré contenido para el tema {pregunta}."})
 
-            # Mostrar descripción (info) y pedir confirmación para iniciar preguntas
-            # Guardamos el tema en tema_actual y estado a 'confirmar_responder'
+            # guardamos tema elegido y ponemos estado a confirmar_responder
             actualizar_usuario(user_id, "tema_actual", pregunta)
             actualizar_usuario(user_id, "estado", "confirmar_responder")
             actualizar_usuario(user_id, "indice", 0)
             actualizar_usuario(user_id, "contador", 0)
 
-            # buscar la primera fila tipo info (normalmente es la primera)
+            # buscamos la fila "info" (normalmente la primera)
             tipo0, contenido0, _ = preguntas_tema[0]
-            # devolver descripción y la pregunta de confirmación
             return jsonify({
                 "respuesta": f"💡 {contenido0}",
-                "siguiente": f"❓ ¿Quieres responder las preguntas del tema **{pregunta}**? (sí / no)"
+                "confirm": f"❓ ¿Quieres responder las preguntas del tema **{pregunta}**? (sí / no)"
             })
 
-        # ------------- Confirmación para iniciar quiz -------------
+        # ---------- el usuario responde a la confirmación (sí/no) ----------
         if estado == "confirmar_responder":
-            # pregunta debe ser sí/no
             if pregunta in ("si", "sí", "s"):
-                # arrancar quiz: colocar indice en la primera pregunta (si el primer elem es info, empezamos en 1)
                 preguntas_tema = obtener_tema(tema_actual)
                 if not preguntas_tema:
-                    # seguridad
                     actualizar_usuario(user_id, "tema_actual", None)
                     actualizar_usuario(user_id, "estado", "registrado")
                     return jsonify({"respuesta": "⚠️ Error: no hay contenido para el tema seleccionado."})
 
-                start_idx = 1 if preguntas_tema and preguntas_tema[0][0] == "info" else 0
-                # si no hay preguntas (p.e. solo info), marcar como completado
+                # empezamos en la primera pregunta (si la fila 0 es info, la pregunta empieza en 1)
+                start_idx = 1 if preguntas_tema[0][0] == "info" else 0
                 if start_idx >= len(preguntas_tema):
-                    # marcar completado y liberar tema
-                    temas_completados_list = temas_completados
-                    if tema_actual not in temas_completados_list:
-                        temas_completados_list.append(tema_actual)
-                        actualizar_usuario(user_id, "temas_completados", ",".join(temas_completados_list))
+                    # no hay preguntas -> marcar completado
+                    lista = temas_completados
+                    if tema_actual not in lista:
+                        lista.append(tema_actual)
+                        actualizar_usuario(user_id, "temas_completados", ",".join(lista))
                     actualizar_usuario(user_id, "tema_actual", None)
                     actualizar_usuario(user_id, "estado", "registrado")
                     return jsonify({"respuesta": f"✅ El tema **{tema_actual}** no contiene preguntas. Marcado como completado."})
 
+                # guardamos indice del primer ítem a responder (pregunta)
                 actualizar_usuario(user_id, "indice", start_idx)
                 actualizar_usuario(user_id, "contador", 0)
                 actualizar_usuario(user_id, "estado", "en_curso")
 
-                # enviar la primera pregunta (o info si por alguna razón)
                 tipo, contenido, _ = preguntas_tema[start_idx]
                 if tipo == "info":
-                    # enviamos info y avanzamos indice
+                    # raro, pero enviamos info y avanzamos índice
                     actualizar_usuario(user_id, "indice", start_idx + 1)
-                    siguiente = preguntas_tema[start_idx+1][1] if start_idx+1 < len(preguntas_tema) else "📌 Fin del tema."
-                    return jsonify({"respuesta": f"💡 {contenido}", "siguiente": siguiente})
+                    return jsonify({"respuesta": f"💡 {contenido}"})
                 else:
-                    # pregunta tipo quiz
-                    opciones = contenido.split(";") if ";" in contenido else [contenido]
-                    opciones_ordenadas = "\n".join([f"• {op.strip()}" for op in opciones])
-                    return jsonify({"respuesta": contenido, "siguiente": f"Opciones:\n{opciones_ordenadas}"})
+                    # parsear opciones separadas por líneas
+                    lines = contenido.splitlines()
+                    if len(lines) > 1:
+                        pregunta_text = lines[0]
+                        opciones = lines[1:]
+                    else:
+                        # fallback: si estaba con ';'
+                        parts = contenido.split(";")
+                        pregunta_text = parts[0]
+                        opciones = parts[1:] if len(parts) > 1 else []
+                    return jsonify({"pregunta": pregunta_text, "opciones": opciones})
 
             elif pregunta in ("no", "n"):
-                # cancelar: quitar tema_actual y volver a lista
+                # cancelar: liberar tema_actual y volver al listado
                 actualizar_usuario(user_id, "tema_actual", None)
                 actualizar_usuario(user_id, "estado", "registrado")
                 pendientes = [t for t in temas_disponibles if t not in temas_completados]
-                return jsonify({
-                    "respuesta": "👍 Perfecto. Aquí están los temas disponibles otra vez:",
-                    "temas": pendientes
-                })
+                return jsonify({"respuesta": "👍 Perfecto. Aquí están los temas disponibles otra vez:", "temas": pendientes})
             else:
                 return jsonify({"respuesta": "✍️ Por favor responde 'sí' o 'no'."})
 
-        # ------------- Manejo del contenido cuando hay un tema en curso -------------
+        # ---------- manejo de preguntas cuando hay tema en curso ----------
         if tema_actual and estado == "en_curso":
             preguntas_tema = obtener_tema(tema_actual)
-            idx = indice or 0
-            cont = contador or 0
+            idx = int(indice or 0)
+            cont = int(contador or 0)
 
-            # seguridad: si idx fuera >= len -> marcar completado
+            # seguridad: si idx >= len -> marcar completado
             if idx >= len(preguntas_tema):
-                # marcar completado
-                temas_completados_list = temas_completados
-                if tema_actual not in temas_completados_list:
-                    temas_completados_list.append(tema_actual)
-                    actualizar_usuario(user_id, "temas_completados", ",".join(temas_completados_list))
+                lista = temas_completados
+                if tema_actual not in lista:
+                    lista.append(tema_actual)
+                    actualizar_usuario(user_id, "temas_completados", ",".join(lista))
                 actualizar_usuario(user_id, "tema_actual", None)
                 actualizar_usuario(user_id, "estado", "registrado")
-                return jsonify({"respuesta": f"✅ Has completado el tema **{tema_actual}**.\n\n✍️ Escribe 'tema' para continuar con otro tema."})
+                pendientes = [t for t in temas_disponibles if t not in lista]
+                return jsonify({"respuesta": f"✅ Has completado el tema **{tema_actual}**.\n\n✍️ Escribe 'tema' para continuar con otro tema.", "temas": pendientes})
 
             tipo, contenido, respuesta_correcta = preguntas_tema[idx]
 
-            # Si el item es info (poco probable dentro en_curso) mostramos y avanzamos
+            # si es info (raro en en_curso) -> mostrar y avanzar
             if tipo == "info":
                 actualizar_usuario(user_id, "indice", idx + 1)
-                siguiente = preguntas_tema[idx+1][1] if idx+1 < len(preguntas_tema) else "📌 Fin del tema."
-                return jsonify({"respuesta": f"💡 {contenido}", "siguiente": siguiente})
+                siguiente = preguntas_tema[idx+1][1] if idx+1 < len(preguntas_tema) else None
+                if siguiente:
+                    return jsonify({"respuesta": f"💡 {contenido}", "siguiente": siguiente})
+                return jsonify({"respuesta": f"💡 {contenido}"})
 
-            # Si es pregunta -> comparar
-            # Si el usuario envía la opción correcta:
+            # parsear pregunta y opciones
+            lines = contenido.splitlines()
+            if len(lines) > 1:
+                pregunta_text = lines[0]
+                opciones = lines[1:]
+            else:
+                parts = contenido.split(";")
+                pregunta_text = parts[0]
+                opciones = parts[1:] if len(parts) > 1 else []
+
+            # comparar respuesta del usuario (pregunta contiene la letra correcta en DB)
             if (pregunta.strip().lower() == (respuesta_correcta or "").strip().lower()):
+                # correcto: avanzar indice
                 actualizar_usuario(user_id, "indice", idx + 1)
                 actualizar_usuario(user_id, "contador", 0)
                 actualizar_usuario(user_id, "respuestas_correctas", (respuestas_correctas or 0) + 1)
-                # preparar siguiente texto
-                siguiente = preguntas_tema[idx+1][1] if idx+1 < len(preguntas_tema) else "📌 Fin del tema."
-                return jsonify({"respuesta": f"🎉 ¡Correcto! {respuesta_correcta}", "siguiente": siguiente})
+
+                # preparar siguiente pregunta (si hay)
+                if idx + 1 < len(preguntas_tema):
+                    tipo_next, contenido_next, _ = preguntas_tema[idx + 1]
+                    if tipo_next == "info":
+                        # enviar info como siguiente
+                        actualizar_usuario(user_id, "indice", idx + 2)  # avanzamos por la info
+                        return jsonify({"respuesta": f"🎉 ¡Correcto! {respuesta_correcta}", "siguiente": f"💡 {contenido_next}"})
+                    else:
+                        # pregunta siguiente -> enviar pregunta + opciones
+                        lines_n = contenido_next.splitlines()
+                        if len(lines_n) > 1:
+                            pregunta_next = lines_n[0]
+                            opciones_next = lines_n[1:]
+                        else:
+                            parts_n = contenido_next.split(";")
+                            pregunta_next = parts_n[0]
+                            opciones_next = parts_n[1:] if len(parts_n) > 1 else []
+                        # dejamos indice en idx+1 (la próxima pregunta) hasta que el usuario responda
+                        actualizar_usuario(user_id, "indice", idx + 1)
+                        return jsonify({"respuesta": f"🎉 ¡Correcto! {respuesta_correcta}", "pregunta": pregunta_next, "opciones": opciones_next})
+                else:
+                    # no hay siguiente -> fin del tema
+                    lista = temas_completados
+                    if tema_actual not in lista:
+                        lista.append(tema_actual)
+                        actualizar_usuario(user_id, "temas_completados", ",".join(lista))
+                    actualizar_usuario(user_id, "tema_actual", None)
+                    actualizar_usuario(user_id, "estado", "registrado")
+                    pendientes = [t for t in temas_disponibles if t not in lista]
+                    return jsonify({"respuesta": f"🎉 ¡Correcto! {respuesta_correcta}\n\n📌 Fin del tema.", "temas": pendientes})
+
             else:
-                # respuesta incorrecta
+                # incorrecto: aumentar contador y permitir reintento hasta 3
                 cont = (cont or 0) + 1
                 if cont >= 3:
                     # mostrar la respuesta y avanzar
                     actualizar_usuario(user_id, "indice", idx + 1)
                     actualizar_usuario(user_id, "contador", 0)
                     actualizar_usuario(user_id, "respuestas_incorrectas", (respuestas_incorrectas or 0) + 1)
-                    siguiente = preguntas_tema[idx+1][1] if idx+1 < len(preguntas_tema) else "📌 Fin del tema."
-                    return jsonify({"respuesta": f"❌ Incorrecto. La respuesta era: {respuesta_correcta}", "siguiente": siguiente})
+                    # siguiente pregunta si existe
+                    if idx + 1 < len(preguntas_tema):
+                        tipo_next, contenido_next, _ = preguntas_tema[idx + 1]
+                        if tipo_next == "info":
+                            actualizar_usuario(user_id, "indice", idx + 2)
+                            return jsonify({"respuesta": f"❌ Incorrecto. La respuesta era: {respuesta_correcta}\n\n💡 {contenido_next}"})
+                        else:
+                            lines_n = contenido_next.splitlines()
+                            pregunta_next = lines_n[0] if len(lines_n) > 1 else contenido_next
+                            opciones_next = lines_n[1:] if len(lines_n) > 1 else (contenido_next.split(";")[1:] if ";" in contenido_next else [])
+                            actualizar_usuario(user_id, "indice", idx + 1)
+                            return jsonify({"respuesta": f"❌ Incorrecto. La respuesta era: {respuesta_correcta}", "pregunta": pregunta_next, "opciones": opciones_next})
+                    else:
+                        lista = temas_completados
+                        if tema_actual not in lista:
+                            lista.append(tema_actual)
+                            actualizar_usuario(user_id, "temas_completados", ",".join(lista))
+                        actualizar_usuario(user_id, "tema_actual", None)
+                        actualizar_usuario(user_id, "estado", "registrado")
+                        pendientes = [t for t in temas_disponibles if t not in lista]
+                        return jsonify({"respuesta": f"❌ Incorrecto. La respuesta era: {respuesta_correcta}\n\n📌 Fin del tema.", "temas": pendientes})
                 else:
-                    # guardar contador y pedir reintento, mostrar opciones
                     actualizar_usuario(user_id, "contador", cont)
-                    opciones = contenido.split(";") if ";" in contenido else [contenido]
-                    opciones_ordenadas = "\n".join([f"• {op.strip()}" for op in opciones])
-                    return jsonify({"respuesta": f"⚠️ Incorrecto. Intento {cont}/3\n\nOpciones:\n{opciones_ordenadas}"})
+                    opciones_mostrar = opciones
+                    return jsonify({"respuesta": f"⚠️ Incorrecto. Intento {cont}/3", "opciones": opciones_mostrar})
 
-        # ------------- Mensaje por defecto -------------
+        # ---------- por defecto ----------
         return jsonify({"respuesta": "⚠️ No entendí tu mensaje. Escribe 'tema' para continuar."})
 
     except Exception as e:
