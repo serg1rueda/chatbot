@@ -9,7 +9,6 @@ app = Flask(__name__)
 # ============================
 # CONFIGURACIÓN DE CORS
 # ============================
-# Permite peticiones desde cualquier origen (útil para pruebas locales y frontend en otra URL)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # ============================
@@ -32,7 +31,7 @@ def chat():
         # Verificar si el usuario existe
         user = obtener_usuario(user_id)
         if not user:
-            # Primera vez que escribe → tomar lo que mandó como nombre
+            # Primera vez que escribe → registrar
             crear_usuario(user_id)
             nombre_limpio = pregunta.title()
             actualizar_usuario(user_id, "nombre", nombre_limpio)
@@ -104,6 +103,10 @@ def chat():
             })
 
         if pregunta in temas_disponibles:
+            # 🚫 Validación: no dejar cambiar si ya hay un tema en curso
+            if tema_actual and tema_actual != pregunta:
+                return jsonify({"respuesta": f"⚠️ Ya estás trabajando en el tema **{tema_actual}**. Debes terminarlo antes de iniciar otro."})
+
             if pregunta in temas_completados:
                 return jsonify({"respuesta": f"✅ El tema **{pregunta}** ya fue completado. Escribe 'tema' para ver los que faltan."})
 
@@ -138,7 +141,7 @@ def chat():
                 siguiente = preguntas[idx+1][1] if idx+1 < len(preguntas) else "📌 Fin del tema."
                 return jsonify({"respuesta": f"💡 {contenido}", "siguiente": siguiente})
 
-            # Preguntas tipo quiz con opciones ordenadas
+            # Preguntas tipo quiz
             opciones = contenido.split(";") if ";" in contenido else [contenido]
             opciones_ordenadas = "\n".join([f"• {op.strip()}" for op in opciones])
 
