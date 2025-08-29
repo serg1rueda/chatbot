@@ -32,7 +32,7 @@ def chat():
             actualizar_usuario(user_id, "estado", "pidiendo_documento")
             return jsonify({"respuesta": f"📄 Perfecto {nombre_limpio}. Ahora, por favor, ingresa tu *número de documento*."})
 
-        # desempaquetar columnas de la tabla usuarios
+        # desempaquetar columnas
         (_, _, nombre, documento, fecha, estado, tema_actual, indice, contador,
          temas_completados, respuestas_correctas, respuestas_incorrectas) = user
 
@@ -46,8 +46,6 @@ def chat():
 
         if estado == "pidiendo_documento":
             actualizar_usuario(user_id, "documento", pregunta_raw.strip())
-
-            # 🚀 Fecha automática
             fecha_valida = datetime.now().date()
             actualizar_usuario(user_id, "fecha", str(fecha_valida))
             actualizar_usuario(user_id, "estado", "registrado")
@@ -73,12 +71,16 @@ def chat():
         if pregunta == "tema":
             if tema_actual and estado in ("en_curso", "confirmar_responder"):
                 return jsonify({"respuesta": f"⚠️ Debes terminar el tema **{tema_actual}** antes de elegir otro."})
+
             pendientes = [t for t in temas_disponibles if t not in temas_completados]
             if not pendientes:
                 total = (respuestas_correctas or 0) + (respuestas_incorrectas or 0)
                 nota = round(((respuestas_correctas or 0) * 5) / total, 2) if total > 0 else 0
                 return jsonify({
-                    "respuesta": f"🎓 Has finalizado la inducción.\n✅ Correctas: {respuestas_correctas}\n❌ Incorrectas: {respuestas_incorrectas}\n📊 Nota final: {nota}/5"
+                    "respuesta": f"🎓 Has finalizado la inducción.\n"
+                                 f"✅ Correctas: {respuestas_correctas}\n"
+                                 f"❌ Incorrectas: {respuestas_incorrectas}\n"
+                                 f"📊 Nota final: {nota}/5"
                 })
             return jsonify({
                 "respuesta": "📚 Temas disponibles. ✍️ Escribe el nombre del tema que quieras iniciar:",
@@ -153,7 +155,7 @@ def chat():
             else:
                 return jsonify({"respuesta": "✍️ Por favor responde 'sí' o 'no'."})
 
-        # ---------- manejo de preguntas en curso ----------
+        # ---------- preguntas en curso ----------
         if tema_actual and estado == "en_curso":
             preguntas_tema = obtener_tema(tema_actual)
             idx = int(indice or 0)
@@ -166,16 +168,24 @@ def chat():
                     actualizar_usuario(user_id, "temas_completados", ",".join(lista))
                 actualizar_usuario(user_id, "tema_actual", None)
                 actualizar_usuario(user_id, "estado", "registrado")
+
                 pendientes = [t for t in temas_disponibles if t not in lista]
+                if not pendientes:
+                    total = (respuestas_correctas or 0) + (respuestas_incorrectas or 0)
+                    nota = round(((respuestas_correctas or 0) * 5) / total, 2) if total > 0 else 0
+                    return jsonify({
+                        "respuesta": f"🎓 Has finalizado la inducción.\n"
+                                     f"✅ Correctas: {respuestas_correctas}\n"
+                                     f"❌ Incorrectas: {respuestas_incorrectas}\n"
+                                     f"📊 Nota final: {nota}/5"
+                    })
+
                 return jsonify({"respuesta": f"✅ Has completado el tema **{tema_actual}**.\n\n✍️ Escribe 'tema' para continuar con otro tema.", "temas": pendientes})
 
             tipo, contenido, respuesta_correcta = preguntas_tema[idx]
 
             if tipo == "info":
                 actualizar_usuario(user_id, "indice", idx + 1)
-                siguiente = preguntas_tema[idx+1][1] if idx+1 < len(preguntas_tema) else None
-                if siguiente:
-                    return jsonify({"respuesta": f"💡 {contenido}", "siguiente": siguiente})
                 return jsonify({"respuesta": f"💡 {contenido}"})
 
             lines = contenido.splitlines()
@@ -215,7 +225,19 @@ def chat():
                         actualizar_usuario(user_id, "temas_completados", ",".join(lista))
                     actualizar_usuario(user_id, "tema_actual", None)
                     actualizar_usuario(user_id, "estado", "registrado")
+
                     pendientes = [t for t in temas_disponibles if t not in lista]
+                    if not pendientes:
+                        total = (respuestas_correctas or 0) + (respuestas_incorrectas or 0)
+                        nota = round(((respuestas_correctas or 0) * 5) / total, 2) if total > 0 else 0
+                        return jsonify({
+                            "respuesta": f"🎉 ¡Correcto! {respuesta_correcta}\n\n"
+                                         f"🎓 Has finalizado la inducción.\n"
+                                         f"✅ Correctas: {respuestas_correctas+1}\n"
+                                         f"❌ Incorrectas: {respuestas_incorrectas}\n"
+                                         f"📊 Nota final: {nota}/5"
+                        })
+
                     return jsonify({"respuesta": f"🎉 ¡Correcto! {respuesta_correcta}\n\n📌 Fin del tema.", "temas": pendientes})
 
             else:
@@ -224,6 +246,7 @@ def chat():
                     actualizar_usuario(user_id, "indice", idx + 1)
                     actualizar_usuario(user_id, "contador", 0)
                     actualizar_usuario(user_id, "respuestas_incorrectas", (respuestas_incorrectas or 0) + 1)
+
                     if idx + 1 < len(preguntas_tema):
                         tipo_next, contenido_next, _ = preguntas_tema[idx + 1]
                         if tipo_next == "info":
@@ -242,12 +265,23 @@ def chat():
                             actualizar_usuario(user_id, "temas_completados", ",".join(lista))
                         actualizar_usuario(user_id, "tema_actual", None)
                         actualizar_usuario(user_id, "estado", "registrado")
+
                         pendientes = [t for t in temas_disponibles if t not in lista]
+                        if not pendientes:
+                            total = (respuestas_correctas or 0) + (respuestas_incorrectas or 0)
+                            nota = round(((respuestas_correctas or 0) * 5) / total, 2) if total > 0 else 0
+                            return jsonify({
+                                "respuesta": f"❌ Incorrecto. La respuesta era: {respuesta_correcta}\n\n"
+                                             f"🎓 Has finalizado la inducción.\n"
+                                             f"✅ Correctas: {respuestas_correctas}\n"
+                                             f"❌ Incorrectas: {respuestas_incorrectas+1}\n"
+                                             f"📊 Nota final: {nota}/5"
+                            })
+
                         return jsonify({"respuesta": f"❌ Incorrecto. La respuesta era: {respuesta_correcta}\n\n📌 Fin del tema.", "temas": pendientes})
                 else:
                     actualizar_usuario(user_id, "contador", cont)
-                    opciones_mostrar = opciones
-                    return jsonify({"respuesta": f"⚠️ Incorrecto. Intento {cont}/3", "opciones": opciones_mostrar})
+                    return jsonify({"respuesta": f"⚠️ Incorrecto. Intento {cont}/3", "opciones": opciones})
 
         return jsonify({"respuesta": "⚠️ No entendí tu mensaje. Escribe 'tema' para continuar."})
 
