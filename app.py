@@ -29,7 +29,6 @@ def chat():
             actualizar_usuario(user_id, "estado", "pidiendo_documento")
             return jsonify({"respuesta": f"📄 Perfecto {nombre_limpio}. Ahora, por favor, ingresa tu *número de documento*."})
 
-        # Mapeo de columnas
         (_, _, nombre, documento, fecha, estado, tema_actual, indice, contador,
          temas_completados, respuestas_correctas, respuestas_incorrectas) = user
 
@@ -72,6 +71,9 @@ def chat():
                 "que superen los desafíos de sostenibilidad. "
                 "Para nosotros, la sostenibilidad no es un discurso, es nuestro día a día."
             )
+
+            # Guardamos los mensajes iniciales para mostrarlos siempre
+            actualizar_usuario(user_id, "mensajes_iniciales", f"{mensaje_registro}\n\n{mensaje_intro}")
 
             return jsonify({"registro": mensaje_registro, "introduccion": mensaje_intro})
 
@@ -148,7 +150,6 @@ def chat():
                 actualizar_usuario(user_id, "contador", 0)
                 actualizar_usuario(user_id, "respuestas_correctas", respuestas_correctas + 1)
                 siguiente = preguntas[idx+1][1] if idx+1 < len(preguntas) else "📌 Fin del tema."
-                # Si es fin del tema, liberar tema_actual
                 if siguiente == "📌 Fin del tema.":
                     actualizar_usuario(user_id, "tema_actual", None)
                 return jsonify({"respuesta": f"🎉 ¡Correcto! {respuesta_correcta}", "siguiente": siguiente})
