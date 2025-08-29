@@ -1,145 +1,186 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from datetime import datetime
+import os
+from models import obtener_usuario, crear_usuario, actualizar_usuario, obtener_tema
 
 app = Flask(__name__)
-CORS(app)
 
-# ========================
-# Sesiones de usuarios
-# ========================
-sessions = {}
+# ============================
+# CONFIGURACIÓN DE CORS
+# ============================
+CORS(app, resources={r"/*": {"origins": "*"}})
 
-# ========================
-# Temas disponibles
-# ========================
-temas = {
-    "riesgos": {
-        "descripcion": "💡 Riesgos y peligros: análisis de trabajo seguro, uso adecuados de EPP, ejercicios de estiramiento, reporte de actos y condiciones inseguras, y reportes de estado de salud.",
-        "preguntas": [
-            {
-                "pregunta": "¿Qué debe hacer un trabajador para prevenir riesgos?",
-                "opciones": [
-                    "a) No reportar actos inseguros",
-                    "b) Hacer ejercicios de estiramiento y usar EPP",
-                    "c) Ignorar el estado de salud",
-                    "d) Ninguna de las anteriores"
-                ],
-                "respuesta": "b"
-            }
-        ]
-    }
-}
+# ============================
+# RUTAS API
+# ============================
 
-# ========================
-# Rutas del chatbot
-# ========================
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({
+        "message": "🚀 Bienvenido a la API del Chatbot de Inducción",
+        "endpoints": {"chat": "POST /chat"}
+    })
+
 @app.route("/chat", methods=["POST"])
 def chat():
-    data = request.json
-    user_id = str(data.get("user_id"))
-    user_message = data.get("message", "").strip()
+    try:
+        user_id = request.json.get("usuario_id") or request.remote_addr
+        pregunta = request.json.get("pregunta", "").strip().lower()
 
-    if not user_id:
-        return jsonify({"response": "❌ Error: falta el user_id"}), 400
+        # Verificar si el usuario existe
+        user = obtener_usuario(user_id)
+        if not user:
+            crear_usuario(user_id)
+            nombre_limpio = pregunta.title()
+            actualizar_usuario(user_id, "nombre", nombre_limpio)
+            actualizar_usuario(user_id, "estado", "pidiendo_documento")
+            return jsonify({"respuesta": f"📄 Perfecto {nombre_limpio}. Ahora, por favor, ingresa tu *número de documento*."})
 
-    # Crear sesión si no existe
-    if user_id not in sessions:
-        sessions[user_id] = {
-            "estado": "nombre",
-            "nombre": "",
-            "documento": "",
-            "fecha": "",
-            "tema": None,
-            "pregunta_actual": 0,
-            "mostro_descripcion": False
-        }
-        return jsonify({"response": "👋 ¡Hola! Bienvenido a la inducción. Por favor dime tu *nombre completo*."})
+        # Mapeo de columnas de la tabla usuarios
+        (_, _, nombre, documento, fecha, estado, tema_actual, indice, contador,
+         temas_completados, respuestas_correctas, respuestas_incorrectas) = user
 
-    session = sessions[user_id]
+        temas_disponibles = ["riesgos", "aspectos", "impacto", "procedimientos", "comites", "emergencias", "responsabilidades"]
+        temas_completados = temas_completados.split(",") if temas_completados else []
 
-    # ========================
-    # Flujo de registro
-    # ========================
-    if session["estado"] == "nombre":
-        session["nombre"] = user_message
-        session["estado"] = "documento"
-        return jsonify({"response": f"✅ Gracias {session['nombre']}. Ahora dime tu *número de documento*."})
+        # =======================
+        # FLUJO DE REGISTRO
+        # =======================
+        if estado == "pidiendo_nombre":
+            actualizar_usuario(user_id, "nombre", pregunta.title())
+            actualizar_usuario(user_id, "estado", "pidiendo_documento")
+            return jsonify({"respuesta": f"📄 Perfecto {pregunta.title()}. Ahora, por favor, ingresa tu *número de documento*."})
 
-    elif session["estado"] == "documento":
-        session["documento"] = user_message
-        session["estado"] = "fecha"
-        return jsonify({"response": "📅 Perfecto. Ingresa la *fecha de esta conversación* (AAAA-MM-DD)."})
+        if estado == "pidiendo_documento":
+            actualizar_usuario(user_id, "documento", pregunta)
+            actualizar_usuario(user_id, "estado", "pidiendo_fecha")
+            return jsonify({"respuesta": "📅 Perfecto. Ingresa la *fecha de esta conversación* (AAAA-MM-DD)."})
 
-    elif session["estado"] == "fecha":
-        session["fecha"] = user_message
-        session["estado"] = "tema"
-        return jsonify({
-            "response": f"✅ Registro completado. 👤 Nombre: {session['nombre']} 🆔 Documento: {session['documento']} 📅 Fecha: {session['fecha']}\n✍️ Escribe 'tema' para ver los temas disponibles."
-        })
+        if estado == "pidiendo_fecha":
+            try:
+                fecha_valida = datetime.strptime(pregunta, "%Y-%m-%d").date()
+                actualizar_usuario(user_id, "fecha", str(fecha_valida))
+            except ValueError:
+                return jsonify({"respuesta": "⚠️ Formato de fecha inválido. Usa AAAA-MM-DD (ejemplo: 2025-08-22)"})
 
-    # ========================
-    # Flujo de selección de temas
-    # ========================
-    elif session["estado"] == "tema":
-        if user_message.lower() == "tema":
-            lista_temas = "📌 Temas disponibles:\n" + "\n".join([f"- {t}" for t in temas.keys()])
-            return jsonify({"response": lista_temas})
+            actualizar_usuario(user_id, "estado", "registrado")
 
-        elif user_message.lower() in temas:
-            session["tema"] = user_message.lower()
-            session["estado"] = "preguntas"
-            session["pregunta_actual"] = 0
-            session["mostro_descripcion"] = False
+            mensaje_registro = (
+                f"✅ Registro completado.\n"
+                f"👤 Nombre: {nombre or pregunta.title()}\n"
+                f"🆔 Documento: {documento or 'N/A'}\n"
+                f"📅 Fecha: {fecha or str(fecha_valida)}\n\n"
+                "✍️ Escribe 'tema' para ver los temas disponibles."
+            )
 
-            descripcion = temas[session["tema"]]["descripcion"]
-            return jsonify({"response": f"📌 {session['tema'].capitalize()}\n{descripcion}\n\n👉 Escribe 'continuar' para empezar las preguntas."})
+            return jsonify({"respuesta": mensaje_registro})
 
-        else:
-            return jsonify({"response": "❌ Tema no válido. Escribe 'tema' para ver los disponibles."})
+        # =======================
+        # SELECCIÓN DE TEMAS
+        # =======================
+        if pregunta == "tema":
+            if tema_actual and estado == "confirmando_tema":
+                return jsonify({"respuesta": f"⚠️ Debes responder si quieres continuar con **{tema_actual}** (sí/no)."})
+            if tema_actual and estado != "confirmando_tema":
+                return jsonify({"respuesta": f"⚠️ Debes terminar el tema **{tema_actual}** antes de elegir otro."})
 
-    # ========================
-    # Flujo de preguntas
-    # ========================
-    elif session["estado"] == "preguntas":
-        tema = temas.get(session["tema"])
+            pendientes = [t for t in temas_disponibles if t not in temas_completados]
+            if not pendientes:
+                total = respuestas_correctas + respuestas_incorrectas
+                nota = round((respuestas_correctas * 5) / total, 2) if total > 0 else 0
+                return jsonify({
+                    "respuesta": f"🎓 Has finalizado la inducción.\n✅ Correctas: {respuestas_correctas}\n❌ Incorrectas: {respuestas_incorrectas}\n📊 Nota final: {nota}/5"
+                })
+            return jsonify({
+                "respuesta": "📚 Temas disponibles. ✍️ Escribe el nombre del tema que quieras iniciar:",
+                "temas": pendientes
+            })
 
-        # Si aún no mostró la descripción, espera a "continuar"
-        if not session["mostro_descripcion"]:
-            if user_message.lower() == "continuar":
-                session["mostro_descripcion"] = True
+        if pregunta in temas_disponibles:
+            if tema_actual and tema_actual != pregunta:
+                return jsonify({"respuesta": f"⚠️ Ya estás trabajando en el tema **{tema_actual}**. Debes terminarlo antes de iniciar otro."})
+
+            if pregunta in temas_completados:
+                return jsonify({"respuesta": f"✅ El tema **{pregunta}** ya fue completado. Escribe 'tema' para ver los que faltan."})
+
+            # Guardar tema en espera de confirmación
+            actualizar_usuario(user_id, "tema_actual", pregunta)
+            actualizar_usuario(user_id, "estado", "confirmando_tema")
+            return jsonify({"respuesta": f"❓ ¿Quieres responder las preguntas del tema **{pregunta}**? (sí / no)"})
+
+        # =======================
+        # CONFIRMACIÓN DE TEMA
+        # =======================
+        if estado == "confirmando_tema" and tema_actual:
+            if pregunta in ["si", "sí", "yes"]:
+                actualizar_usuario(user_id, "estado", "en_tema")
+                actualizar_usuario(user_id, "indice", 0)
+                actualizar_usuario(user_id, "contador", 0)
+                preguntas = obtener_tema(tema_actual)
+                if not preguntas:
+                    return jsonify({"respuesta": f"⚠️ No encontré contenido para el tema {tema_actual}."})
+                tipo, contenido, _ = preguntas[0]
+                return jsonify({"respuesta": f"💡 {contenido}"})
+
+            elif pregunta in ["no", "n"]:
+                actualizar_usuario(user_id, "tema_actual", None)
+                actualizar_usuario(user_id, "estado", "registrado")
+                pendientes = [t for t in temas_disponibles if t not in temas_completados]
+                return jsonify({"respuesta": "📚 De acuerdo, volvamos a los temas disponibles:", "temas": pendientes})
+
             else:
-                return jsonify({"response": "👉 Escribe 'continuar' para empezar con las preguntas."})
+                return jsonify({"respuesta": "⚠️ Responde con 'sí' o 'no' para continuar."})
 
-        # Obtener pregunta actual
-        idx = session["pregunta_actual"]
-        if idx < len(tema["preguntas"]):
-            pregunta = tema["preguntas"][idx]
-            texto = f"{idx+1}. {pregunta['pregunta']}\n" + "\n".join(pregunta["opciones"])
-            session["estado"] = "responder"
-            return jsonify({"response": texto})
-        else:
-            session["estado"] = "tema"
-            return jsonify({"response": "🎉 Has terminado este tema. Escribe 'tema' para elegir otro."})
+        # =======================
+        # MANEJO DE CONTENIDO
+        # =======================
+        if tema_actual and estado == "en_tema":
+            preguntas = obtener_tema(tema_actual)
+            idx = indice
+            cont = contador
 
-    # ========================
-    # Flujo de respuestas
-    # ========================
-    elif session["estado"] == "responder":
-        tema = temas.get(session["tema"])
-        idx = session["pregunta_actual"]
-        pregunta = tema["preguntas"][idx]
+            if idx >= len(preguntas):
+                temas_completados.append(tema_actual)
+                actualizar_usuario(user_id, "temas_completados", ",".join(temas_completados))
+                actualizar_usuario(user_id, "tema_actual", None)
+                actualizar_usuario(user_id, "estado", "registrado")
+                return jsonify({"respuesta": f"✅ Has completado el tema **{tema_actual}**.\n\n✍️ Escribe 'tema' para continuar con otro tema."})
 
-        if user_message.lower() == pregunta["respuesta"]:
-            respuesta = "✅ Correcto"
-        else:
-            respuesta = f"❌ Incorrecto. La respuesta correcta era: {pregunta['respuesta']}"
+            tipo, contenido, respuesta_correcta = preguntas[idx]
 
-        session["pregunta_actual"] += 1
-        session["estado"] = "preguntas"
-        return jsonify({"response": respuesta + "\n👉 Escribe 'continuar' para la siguiente pregunta."})
+            if tipo == "info":
+                actualizar_usuario(user_id, "indice", idx + 1)
+                siguiente = preguntas[idx+1][1] if idx+1 < len(preguntas) else "📌 Fin del tema."
+                return jsonify({"respuesta": f"💡 {contenido}", "siguiente": siguiente})
 
-    return jsonify({"response": "⚠️ No entendí tu mensaje."})
+            opciones = contenido.split(";") if ";" in contenido else [contenido]
+            opciones_ordenadas = "\n".join([f"• {op.strip()}" for op in opciones])
+
+            if pregunta.strip().lower() == (respuesta_correcta or "").strip().lower():
+                actualizar_usuario(user_id, "indice", idx + 1)
+                actualizar_usuario(user_id, "contador", 0)
+                actualizar_usuario(user_id, "respuestas_correctas", respuestas_correctas + 1)
+                siguiente = preguntas[idx+1][1] if idx+1 < len(preguntas) else "📌 Fin del tema."
+                return jsonify({"respuesta": f"🎉 ¡Correcto! {respuesta_correcta}", "siguiente": siguiente})
+            else:
+                cont += 1
+                if cont >= 3:
+                    actualizar_usuario(user_id, "indice", idx + 1)
+                    actualizar_usuario(user_id, "contador", 0)
+                    actualizar_usuario(user_id, "respuestas_incorrectas", respuestas_incorrectas + 1)
+                    siguiente = preguntas[idx+1][1] if idx+1 < len(preguntas) else "📌 Fin del tema."
+                    return jsonify({"respuesta": f"❌ Incorrecto. La respuesta era: {respuesta_correcta}", "siguiente": siguiente})
+                else:
+                    actualizar_usuario(user_id, "contador", cont)
+                    return jsonify({"respuesta": f"⚠️ Incorrecto. Intento {cont}/3\n\nOpciones:\n{opciones_ordenadas}"})
+
+        return jsonify({"respuesta": "⚠️ No entendí tu mensaje. Escribe 'tema' para continuar."})
+
+    except Exception as e:
+        print("💥 Error en /chat:", e)
+        return jsonify({"respuesta": "❌ Ocurrió un error en el servidor"}), 500
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)
