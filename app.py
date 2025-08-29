@@ -40,7 +40,7 @@ def chat():
 
         # Mapeo de columnas de la tabla usuarios
         (_, _, nombre, documento, fecha, estado, tema_actual, indice, contador,
-         temas_completados, respuestas_correctas, respuestas_incorrectas) = user
+         temas_completados, respuestas_correctas, respuestas_incorrectas, tema_seleccionado) = user
 
         temas_disponibles = ["riesgos", "aspectos", "impacto", "procedimientos", "comites", "emergencias", "responsabilidades"]
         temas_completados = temas_completados.split(",") if temas_completados else []
@@ -90,7 +90,6 @@ def chat():
         # SELECCIÓN DE TEMAS
         # =======================
         if pregunta == "tema":
-            # 🚫 Bloquear si ya hay un tema en curso
             if tema_actual:
                 return jsonify({"respuesta": f"⚠️ Debes terminar el tema **{tema_actual}** antes de elegir otro."})
 
@@ -106,29 +105,41 @@ def chat():
                 "temas": pendientes
             })
 
+        # =======================
+        # CONFIRMACIÓN ANTES DE INICIAR TEMA
+        # =======================
+        if estado == "confirmando_tema":
+            if pregunta in ["si", "sí"]:
+                tema_para_iniciar = tema_seleccionado
+                actualizar_usuario(user_id, "estado", "registrado")
+                actualizar_usuario(user_id, "tema_actual", tema_para_iniciar)
+                actualizar_usuario(user_id, "indice", 0)
+                actualizar_usuario(user_id, "contador", 0)
+                preguntas = obtener_tema(tema_para_iniciar)
+                if not preguntas:
+                    return jsonify({"respuesta": f"⚠️ No encontré contenido para el tema {tema_para_iniciar}."})
+                tipo, contenido, _ = preguntas[0]
+                siguiente = preguntas[1][1] if len(preguntas) > 1 else "📌 Fin del tema."
+                return jsonify({"respuesta": f"💡 {contenido}", "siguiente": siguiente})
+            else:
+                actualizar_usuario(user_id, "estado", "registrado")
+                actualizar_usuario(user_id, "tema_seleccionado", None)
+                pendientes = [t for t in temas_disponibles if t not in temas_completados]
+                return jsonify({
+                    "respuesta": "👍 De acuerdo, vuelve a elegir un tema de la lista:",
+                    "temas": pendientes
+                })
+
+        # Manejo de selección de tema (cuando aún no está confirmado)
         if pregunta in temas_disponibles:
-            # 🚫 No dejar cambiar si ya hay un tema en curso distinto
             if tema_actual and tema_actual != pregunta:
                 return jsonify({"respuesta": f"⚠️ Ya estás trabajando en el tema **{tema_actual}**. Debes terminarlo antes de iniciar otro."})
-
-            # ✅ Si intenta seleccionar el mismo tema que ya tiene activo, no reseteamos progreso
-            if tema_actual and tema_actual == pregunta:
-                # Responder de forma amable sin reiniciar índices
-                return jsonify({"respuesta": f"🟡 Ya estás en **{tema_actual}**. Continúa respondiendo para avanzar."})
-
             if pregunta in temas_completados:
                 return jsonify({"respuesta": f"✅ El tema **{pregunta}** ya fue completado. Escribe 'tema' para ver los que faltan."})
 
-            # Iniciar tema (solo cuando no hay activo)
-            actualizar_usuario(user_id, "tema_actual", pregunta)
-            actualizar_usuario(user_id, "indice", 0)
-            actualizar_usuario(user_id, "contador", 0)
-            preguntas = obtener_tema(pregunta)
-            if not preguntas:
-                return jsonify({"respuesta": f"⚠️ No encontré contenido para el tema {pregunta}."})
-            tipo, contenido, _ = preguntas[0]
-            siguiente = preguntas[1][1] if len(preguntas) > 1 else "📌 Fin del tema."
-            return jsonify({"respuesta": f"💡 {contenido}", "siguiente": siguiente})
+            actualizar_usuario(user_id, "estado", "confirmando_tema")
+            actualizar_usuario(user_id, "tema_seleccionado", pregunta)
+            return jsonify({"respuesta": f"❓ ¿Quieres responder las preguntas del tema **{pregunta}**? Responde 'si' o 'no'."})
 
         # =======================
         # MANEJO DE CONTENIDO
