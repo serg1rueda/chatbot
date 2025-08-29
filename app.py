@@ -46,21 +46,17 @@ def chat():
 
         if estado == "pidiendo_documento":
             actualizar_usuario(user_id, "documento", pregunta_raw.strip())
-            actualizar_usuario(user_id, "estado", "pidiendo_fecha")
-            return jsonify({"respuesta": "📅 Perfecto. Ingresa la *fecha de esta conversación* (AAAA-MM-DD)."})
 
-        if estado == "pidiendo_fecha":
-            try:
-                fecha_valida = datetime.strptime(pregunta_raw.strip(), "%Y-%m-%d").date()
-                actualizar_usuario(user_id, "fecha", str(fecha_valida))
-            except ValueError:
-                return jsonify({"respuesta": "⚠️ Formato de fecha inválido. Usa AAAA-MM-DD (ejemplo: 2025-08-22)"})
+            # 🚀 Fecha automática
+            fecha_valida = datetime.now().date()
+            actualizar_usuario(user_id, "fecha", str(fecha_valida))
             actualizar_usuario(user_id, "estado", "registrado")
+
             mensaje_registro = (
                 f"✅ Registro completado.\n"
-                f"👤 Nombre: {nombre or pregunta_raw.strip().title()}\n"
-                f"🆔 Documento: {documento or 'N/A'}\n"
-                f"📅 Fecha: {fecha or str(fecha_valida)}\n\n"
+                f"👤 Nombre: {nombre or 'Usuario'}\n"
+                f"🆔 Documento: {pregunta_raw.strip()}\n"
+                f"📅 Fecha: {fecha_valida}\n\n"
                 "✍️ Escribe 'tema' para ver los temas disponibles."
             )
             mensaje_intro = (
@@ -75,7 +71,6 @@ def chat():
 
         # ---------- mostrar lista de temas ----------
         if pregunta == "tema":
-            # bloquear si ya hay un tema activo
             if tema_actual and estado in ("en_curso", "confirmar_responder"):
                 return jsonify({"respuesta": f"⚠️ Debes terminar el tema **{tema_actual}** antes de elegir otro."})
             pendientes = [t for t in temas_disponibles if t not in temas_completados]
@@ -90,7 +85,7 @@ def chat():
                 "temas": pendientes
             })
 
-        # ---------- seleccionar tema: mostrar descripción y pedir confirmación ----------
+        # ---------- seleccionar tema ----------
         if pregunta in temas_disponibles:
             if tema_actual and tema_actual != pregunta and estado == "en_curso":
                 return jsonify({"respuesta": f"⚠️ Ya estás trabajando en el tema **{tema_actual}**. Debes terminarlo antes de iniciar otro."})
@@ -101,20 +96,18 @@ def chat():
             if not preguntas_tema:
                 return jsonify({"respuesta": f"⚠️ No encontré contenido para el tema {pregunta}."})
 
-            # guardamos tema elegido y ponemos estado a confirmar_responder
             actualizar_usuario(user_id, "tema_actual", pregunta)
             actualizar_usuario(user_id, "estado", "confirmar_responder")
             actualizar_usuario(user_id, "indice", 0)
             actualizar_usuario(user_id, "contador", 0)
 
-            # buscamos la fila "info" (normalmente la primera)
             tipo0, contenido0, _ = preguntas_tema[0]
             return jsonify({
                 "respuesta": f"💡 {contenido0}",
                 "confirm": f"❓ ¿Quieres responder las preguntas del tema **{pregunta}**? (sí / no)"
             })
 
-        # ---------- el usuario responde a la confirmación (sí/no) ----------
+        # ---------- confirmación (sí/no) ----------
         if estado == "confirmar_responder":
             if pregunta in ("si", "sí", "s"):
                 preguntas_tema = obtener_tema(tema_actual)
@@ -123,10 +116,8 @@ def chat():
                     actualizar_usuario(user_id, "estado", "registrado")
                     return jsonify({"respuesta": "⚠️ Error: no hay contenido para el tema seleccionado."})
 
-                # empezamos en la primera pregunta (si la fila 0 es info, la pregunta empieza en 1)
                 start_idx = 1 if preguntas_tema[0][0] == "info" else 0
                 if start_idx >= len(preguntas_tema):
-                    # no hay preguntas -> marcar completado
                     lista = temas_completados
                     if tema_actual not in lista:
                         lista.append(tema_actual)
@@ -135,31 +126,26 @@ def chat():
                     actualizar_usuario(user_id, "estado", "registrado")
                     return jsonify({"respuesta": f"✅ El tema **{tema_actual}** no contiene preguntas. Marcado como completado."})
 
-                # guardamos indice del primer ítem a responder (pregunta)
                 actualizar_usuario(user_id, "indice", start_idx)
                 actualizar_usuario(user_id, "contador", 0)
                 actualizar_usuario(user_id, "estado", "en_curso")
 
                 tipo, contenido, _ = preguntas_tema[start_idx]
                 if tipo == "info":
-                    # raro, pero enviamos info y avanzamos índice
                     actualizar_usuario(user_id, "indice", start_idx + 1)
                     return jsonify({"respuesta": f"💡 {contenido}"})
                 else:
-                    # parsear opciones separadas por líneas
                     lines = contenido.splitlines()
                     if len(lines) > 1:
                         pregunta_text = lines[0]
                         opciones = lines[1:]
                     else:
-                        # fallback: si estaba con ';'
                         parts = contenido.split(";")
                         pregunta_text = parts[0]
                         opciones = parts[1:] if len(parts) > 1 else []
                     return jsonify({"pregunta": pregunta_text, "opciones": opciones})
 
             elif pregunta in ("no", "n"):
-                # cancelar: liberar tema_actual y volver al listado
                 actualizar_usuario(user_id, "tema_actual", None)
                 actualizar_usuario(user_id, "estado", "registrado")
                 pendientes = [t for t in temas_disponibles if t not in temas_completados]
@@ -167,13 +153,12 @@ def chat():
             else:
                 return jsonify({"respuesta": "✍️ Por favor responde 'sí' o 'no'."})
 
-        # ---------- manejo de preguntas cuando hay tema en curso ----------
+        # ---------- manejo de preguntas en curso ----------
         if tema_actual and estado == "en_curso":
             preguntas_tema = obtener_tema(tema_actual)
             idx = int(indice or 0)
             cont = int(contador or 0)
 
-            # seguridad: si idx >= len -> marcar completado
             if idx >= len(preguntas_tema):
                 lista = temas_completados
                 if tema_actual not in lista:
@@ -186,7 +171,6 @@ def chat():
 
             tipo, contenido, respuesta_correcta = preguntas_tema[idx]
 
-            # si es info (raro en en_curso) -> mostrar y avanzar
             if tipo == "info":
                 actualizar_usuario(user_id, "indice", idx + 1)
                 siguiente = preguntas_tema[idx+1][1] if idx+1 < len(preguntas_tema) else None
@@ -194,7 +178,6 @@ def chat():
                     return jsonify({"respuesta": f"💡 {contenido}", "siguiente": siguiente})
                 return jsonify({"respuesta": f"💡 {contenido}"})
 
-            # parsear pregunta y opciones
             lines = contenido.splitlines()
             if len(lines) > 1:
                 pregunta_text = lines[0]
@@ -204,22 +187,17 @@ def chat():
                 pregunta_text = parts[0]
                 opciones = parts[1:] if len(parts) > 1 else []
 
-            # comparar respuesta del usuario (pregunta contiene la letra correcta en DB)
             if (pregunta.strip().lower() == (respuesta_correcta or "").strip().lower()):
-                # correcto: avanzar indice
                 actualizar_usuario(user_id, "indice", idx + 1)
                 actualizar_usuario(user_id, "contador", 0)
                 actualizar_usuario(user_id, "respuestas_correctas", (respuestas_correctas or 0) + 1)
 
-                # preparar siguiente pregunta (si hay)
                 if idx + 1 < len(preguntas_tema):
                     tipo_next, contenido_next, _ = preguntas_tema[idx + 1]
                     if tipo_next == "info":
-                        # enviar info como siguiente
-                        actualizar_usuario(user_id, "indice", idx + 2)  # avanzamos por la info
+                        actualizar_usuario(user_id, "indice", idx + 2)
                         return jsonify({"respuesta": f"🎉 ¡Correcto! {respuesta_correcta}", "siguiente": f"💡 {contenido_next}"})
                     else:
-                        # pregunta siguiente -> enviar pregunta + opciones
                         lines_n = contenido_next.splitlines()
                         if len(lines_n) > 1:
                             pregunta_next = lines_n[0]
@@ -228,11 +206,9 @@ def chat():
                             parts_n = contenido_next.split(";")
                             pregunta_next = parts_n[0]
                             opciones_next = parts_n[1:] if len(parts_n) > 1 else []
-                        # dejamos indice en idx+1 (la próxima pregunta) hasta que el usuario responda
                         actualizar_usuario(user_id, "indice", idx + 1)
                         return jsonify({"respuesta": f"🎉 ¡Correcto! {respuesta_correcta}", "pregunta": pregunta_next, "opciones": opciones_next})
                 else:
-                    # no hay siguiente -> fin del tema
                     lista = temas_completados
                     if tema_actual not in lista:
                         lista.append(tema_actual)
@@ -243,14 +219,11 @@ def chat():
                     return jsonify({"respuesta": f"🎉 ¡Correcto! {respuesta_correcta}\n\n📌 Fin del tema.", "temas": pendientes})
 
             else:
-                # incorrecto: aumentar contador y permitir reintento hasta 3
                 cont = (cont or 0) + 1
                 if cont >= 3:
-                    # mostrar la respuesta y avanzar
                     actualizar_usuario(user_id, "indice", idx + 1)
                     actualizar_usuario(user_id, "contador", 0)
                     actualizar_usuario(user_id, "respuestas_incorrectas", (respuestas_incorrectas or 0) + 1)
-                    # siguiente pregunta si existe
                     if idx + 1 < len(preguntas_tema):
                         tipo_next, contenido_next, _ = preguntas_tema[idx + 1]
                         if tipo_next == "info":
@@ -276,7 +249,6 @@ def chat():
                     opciones_mostrar = opciones
                     return jsonify({"respuesta": f"⚠️ Incorrecto. Intento {cont}/3", "opciones": opciones_mostrar})
 
-        # ---------- por defecto ----------
         return jsonify({"respuesta": "⚠️ No entendí tu mensaje. Escribe 'tema' para continuar."})
 
     except Exception as e:
