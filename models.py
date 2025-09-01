@@ -4,7 +4,7 @@ import os
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://neondb_owner:npg_wdLcRaVTk68A@ep-jolly-heart-adfm5yui-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+    "postgresql://neondb_owner:npg_cxKm4qaU1DNl@ep-blue-field-admkxy2t-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
 )
 
 def get_connection():
