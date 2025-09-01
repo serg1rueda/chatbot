@@ -66,8 +66,9 @@ def chat():
                 "Nuestro compromiso es apoyar a los clientes con soluciones inteligentes "
                 "que superen los desafíos de sostenibilidad. "
                 "Para nosotros, la sostenibilidad no es un discurso, es nuestro día a día.\n\n"
-                "a continuación selecciona los temas de la inducción para continuar con el proceso de evaluación"
+                "➡️ A continuación selecciona los temas de la inducción para continuar con el proceso de evaluación."
             )
+
             return jsonify({"respuesta": mensaje_registro, "siguiente": mensaje_intro})
 
         # ---------- mostrar lista de temas ----------
