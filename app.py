@@ -28,7 +28,9 @@ def chat():
         if not user:
             crear_usuario(user_id)
             actualizar_usuario(user_id, "estado", "pidiendo_nombre")
-            return jsonify({"respuesta": "👋 ¡Hola! Soy tu asistente de inducción. Primero escribe tu *nombre completo* para continuar."})
+             # 👇 solo el mensaje de bienvenida inicial
+            return jsonify({"respuesta": "👋 ¡Hola! Soy tu asistente de inducción. Escribe tu *nombre completo* para continuar."})
+
 
         # desempaquetar columnas
         (_, _, nombre, documento, fecha, estado, tema_actual, indice, contador,
@@ -38,15 +40,15 @@ def chat():
 
         # ---------- flujo de registro ----------
         if estado == "pidiendo_nombre":
-    # ✅ validación: solo letras y espacios
+            # ✅ validación: solo letras y espacios
             if not pregunta_raw.replace(" ", "").isalpha():
-                return jsonify({"respuesta": "⚠️ El nombre solo puede contener letras. Por favor ingresa tu *nombre completo*."})
+                return jsonify({"respuesta": "⚠️ El nombre solo puede contener letras. Inténtalo de nuevo."})
 
             nombre_actualizado = pregunta_raw.strip().title()
             actualizar_usuario(user_id, "nombre", nombre_actualizado)
             actualizar_usuario(user_id, "estado", "pidiendo_documento")
 
-            return jsonify({"respuesta": f"📄 Perfecto {nombre_actualizado}. Ahora, por favor, ingresa tu *número de documento*."})
+            return jsonify({"respuesta": f"📄 Perfecto {nombre_actualizado}. Ahora ingresa tu *número de documento*."})
 
 
         if estado == "pidiendo_documento":
