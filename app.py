@@ -27,10 +27,8 @@ def chat():
         user = obtener_usuario(user_id)
         if not user:
             crear_usuario(user_id)
-            nombre_limpio = pregunta_raw.strip().title() if pregunta_raw else "Usuario"
-            actualizar_usuario(user_id, "nombre", nombre_limpio)
-            actualizar_usuario(user_id, "estado", "pidiendo_documento")
-            return jsonify({"respuesta": f"📄 Perfecto {nombre_limpio}. Ahora, por favor, ingresa tu *número de documento*."})
+            actualizar_usuario(user_id, "estado", "pidiendo_nombre")
+            return jsonify({"respuesta": "👋 ¡Hola! Soy tu asistente de inducción. Primero escribe tu *nombre completo* para continuar."})
 
         # desempaquetar columnas
         (_, _, nombre, documento, fecha, estado, tema_actual, indice, contador,
