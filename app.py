@@ -38,6 +38,10 @@ def chat():
 
         # ---------- flujo de registro ----------
         if estado == "pidiendo_nombre":
+            # ✅ validación: solo letras y espacios
+            if not pregunta_raw.replace(" ", "").isalpha():
+                return jsonify({"respuesta": "⚠️ El nombre solo puede contener letras. Por favor ingresa tu *nombre completo*."})
+
             actualizar_usuario(user_id, "nombre", pregunta_raw.strip().title())
             actualizar_usuario(user_id, "estado", "pidiendo_documento")
             return jsonify({"respuesta": f"📄 Perfecto {pregunta_raw.strip().title()}. Ahora, por favor, ingresa tu *número de documento*."})
