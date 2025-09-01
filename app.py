@@ -38,13 +38,16 @@ def chat():
 
         # ---------- flujo de registro ----------
         if estado == "pidiendo_nombre":
-            # ✅ validación: solo letras y espacios
+    # ✅ validación: solo letras y espacios
             if not pregunta_raw.replace(" ", "").isalpha():
                 return jsonify({"respuesta": "⚠️ El nombre solo puede contener letras. Por favor ingresa tu *nombre completo*."})
 
-            actualizar_usuario(user_id, "nombre", pregunta_raw.strip().title())
+            nombre_actualizado = pregunta_raw.strip().title()
+            actualizar_usuario(user_id, "nombre", nombre_actualizado)
             actualizar_usuario(user_id, "estado", "pidiendo_documento")
-            return jsonify({"respuesta": f"📄 Perfecto {pregunta_raw.strip().title()}. Ahora, por favor, ingresa tu *número de documento*."})
+
+            return jsonify({"respuesta": f"📄 Perfecto {nombre_actualizado}. Ahora, por favor, ingresa tu *número de documento*."})
+
 
         if estado == "pidiendo_documento":
             actualizar_usuario(user_id, "documento", pregunta_raw.strip())
@@ -54,11 +57,12 @@ def chat():
 
             mensaje_registro = (
                 f"✅ Registro completado.\n"
-                f"👤 Nombre: {nombre or 'Usuario'}\n"
+                f"👤 Nombre: {nombre or pregunta_raw.strip().title()}\n"   # <-- aquí corriges
                 f"🆔 Documento: {pregunta_raw.strip()}\n"
                 f"📅 Fecha: {fecha_valida}\n\n"
                 "✍️ Escribe 'tema' para ver los temas disponibles."
             )
+
             mensaje_intro = (
                 "🌱 **Quiénes Somos**\n\n"
                 "Ambipar ofrece servicios y productos para la gestión ambiental, "
