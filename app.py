@@ -109,15 +109,28 @@ def chat():
                 return jsonify({"respuesta": f"⚠️ No encontré contenido para el tema {pregunta}."})
 
             actualizar_usuario(user_id, "tema_actual", pregunta)
-            actualizar_usuario(user_id, "estado", "confirmar_responder")
+            actualizar_usuario(user_id, "estado", "en_curso")
             actualizar_usuario(user_id, "indice", 0)
             actualizar_usuario(user_id, "contador", 0)
 
-            tipo0, contenido0, _ = preguntas_tema[0]
-            return jsonify({
-                "respuesta": f"💡 {contenido0}",
-                "confirm": f"❓ ¿Quieres responder las preguntas del tema **{pregunta}**? (sí / no)"
-            })
+            # arrancar directamente con la primera pregunta o info
+            tipo0, contenido0, respuesta0 = preguntas_tema[0]
+            if tipo0 == "info":
+            # si la primera entrada es info, la mandamos y luego saltamos a la siguiente
+                actualizar_usuario(user_id, "indice", 1)
+                return jsonify({"respuesta": f"💡 {contenido0}"})
+            else:
+            # es una pregunta
+                lines = contenido0.splitlines()
+                if len(lines) > 1:
+                    pregunta_text = lines[0]
+                    opciones = lines[1:]
+                else:
+                    parts = contenido0.split(";")
+                    pregunta_text = parts[0]
+                    opciones = parts[1:] if len(parts) > 1 else []
+                return jsonify({"pregunta": pregunta_text, "opciones": opciones})
+
 
         # ---------- confirmación (sí/no) ----------
         if estado == "confirmar_responder":
